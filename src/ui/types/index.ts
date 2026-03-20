@@ -8,12 +8,47 @@ export interface ProductFields {
   brandInstructions: string;
 }
 
+export interface PolicyMatch {
+  document_name: string;
+  policy_title: string;
+  rule_title: string;
+  reason: string;
+  evidence: string[];
+}
+
+export interface PolicyDecision {
+  status: 'pass' | 'fail';
+  label: string;
+  summary: string;
+  matched_policies: PolicyMatch[];
+  warnings: string[];
+  evidence_note: string;
+}
+
+export interface PolicyDocument {
+  document_hash: string;
+  filename: string;
+  file_size: number;
+  chunk_count: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface PolicyUploadResult {
+  document_hash: string;
+  filename: string;
+  chunk_count: number;
+  already_loaded: boolean;
+  processed: boolean;
+}
+
 export interface AugmentedData {
   title: string;
   description: string;
   colors: string[];
   tags: string[];
   categories?: string[];
+  policyDecision?: PolicyDecision;
 }
 
 export interface ImageMetadata {
@@ -48,4 +83,3 @@ export interface NIMHealthStatus {
   flux: HealthState;
   trellis: HealthState;
 }
-

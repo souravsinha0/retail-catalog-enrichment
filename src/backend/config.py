@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import yaml
+import os
 from pathlib import Path
 from typing import Dict, Any, Optional
 import logging
@@ -49,6 +50,9 @@ class Config:
                 raise ValueError(f"{section.upper()} {field} not configured")
             result[field] = value
         return result
+
+    def _get_optional_section_config(self, section: str) -> Dict[str, Any]:
+        return self._config_data.get(section, {}) or {}
         
     def get_vlm_config(self) -> Dict[str, str]:
         return self._get_section_config('vlm', ['url', 'model'])
@@ -61,6 +65,33 @@ class Config:
         
     def get_trellis_config(self) -> Dict[str, str]:
         return self._get_section_config('trellis', ['url'])
+
+    def get_embeddings_config(self) -> Dict[str, str]:
+        config = self._get_optional_section_config('embeddings')
+        return {
+            "url": os.getenv("NVIDIA_API_BASE_URL") or config.get("url") or "https://integrate.api.nvidia.com/v1",
+            "model": config.get("model") or "nvidia/nv-embedqa-e5-v5",
+        }
+
+    def get_milvus_config(self) -> Dict[str, Any]:
+        config = self._get_optional_section_config('milvus')
+        return {
+            "host": os.getenv("MILVUS_HOST") or config.get("host") or "localhost",
+            "port": os.getenv("MILVUS_PORT") or str(config.get("port") or "19530"),
+            "collection": os.getenv("MILVUS_COLLECTION") or config.get("collection") or "policy_chunks",
+            "alias": config.get("alias") or "policy_library",
+        }
+
+    def get_policy_library_config(self) -> Dict[str, Any]:
+        config = self._get_optional_section_config('policy_library')
+        return {
+            "storage_dir": os.getenv("POLICY_LIBRARY_STORAGE_DIR") or config.get("storage_dir") or "data/policies",
+            "db_path": os.getenv("POLICY_LIBRARY_DB_PATH") or config.get("db_path") or "data/policies/library.db",
+            "top_k": int(os.getenv("POLICY_LIBRARY_TOP_K") or config.get("top_k") or 8),
+            "min_relevance_score": float(
+                os.getenv("POLICY_LIBRARY_MIN_RELEVANCE_SCORE") or config.get("min_relevance_score") or 0.3
+            ),
+        }
 
 
 _config_instance: Optional[Config] = None

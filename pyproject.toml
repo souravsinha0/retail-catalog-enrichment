@@ -17,7 +17,9 @@ dependencies = [
   "requests==2.32.5",
   "httpx==0.28.1",
   "pillow==12.1.1",
+  "pymilvus==2.5.10",
   "pyyaml==6.0.3",
+  "pypdf==6.1.1",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -34,5 +36,3 @@ dev-dependencies = [
   "pytest-asyncio==0.25.2",
   "httpx==0.28.1",
 ]
-
-

@@ -14,7 +14,7 @@ Returns a plaintext greeting message.
 
 **Response**: 
 ```
-Welcome to Catalog Enrichment API
+Catalog Enrichment Backend
 ```
 
 ### GET `/health`
@@ -48,9 +48,110 @@ The API provides a modular approach for optimal performance and flexibility:
 
 ---
 
-## 1️⃣ Fast VLM Analysis: `/vlm/analyze`
+## 1️⃣ Policy Library: `/policies`
 
-Extract product fields using NVIDIA Nemotron VLM (no image generation).
+Manage the persistent PDF policy library used during analysis.
+
+Policy documents are handled as a persistent single-user RAG library:
+- uploaded PDFs are parsed and normalized into structured policy summaries
+- normalized policy records are embedded and stored in Milvus
+- `/vlm/analyze` automatically performs semantic retrieval against the loaded policy library
+- the compliance classifier receives the analyzed product plus the retrieved policy records
+
+### GET `/policies`
+
+Returns metadata for the currently loaded policy library.
+
+### Response Schema
+
+```json
+{
+  "documents": [
+    {
+      "document_hash": "string",
+      "filename": "string",
+      "file_size": 12345,
+      "chunk_count": 10,
+      "created_at": 1735689600,
+      "updated_at": 1735689600
+    }
+  ]
+}
+```
+
+`chunk_count` is the number of indexed policy records generated from the normalized PDF, not the raw page count.
+
+### POST `/policies`
+
+**Content-Type**: `multipart/form-data`
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `files` | file[] | Yes | One or more PDF files to add to the persistent policy library |
+| `locale` | string | No | Locale used when normalizing newly uploaded policies (default: `en-US`) |
+
+### POST Example
+
+```bash
+curl -X POST \
+  -F "locale=en-US" \
+  -F "files=@policy-a.pdf;type=application/pdf" \
+  -F "files=@policy-b.pdf;type=application/pdf" \
+  http://localhost:8000/policies
+```
+
+### POST Response Schema
+
+```json
+{
+  "documents": [
+    {
+      "document_hash": "string",
+      "filename": "string",
+      "file_size": 12345,
+      "chunk_count": 10,
+      "created_at": 1735689600,
+      "updated_at": 1735689600
+    }
+  ],
+  "results": [
+    {
+      "document_hash": "string",
+      "filename": "string",
+      "chunk_count": 10,
+      "already_loaded": false,
+      "processed": true
+    }
+  ]
+}
+```
+
+Notes:
+- repeated uploads of the same PDF are deduplicated by content hash
+- `already_loaded=true` means the document was already present in the library
+- `processed=true` means the upload was newly parsed, normalized, embedded, and indexed
+
+### DELETE `/policies`
+
+Clears the persistent policy library, including stored PDF artifacts and vector embeddings.
+
+```bash
+curl -X DELETE http://localhost:8000/policies
+```
+
+### DELETE Response
+
+```json
+{
+  "status": "ok"
+}
+```
+
+---
+
+## 2️⃣ Fast VLM Analysis: `/vlm/analyze`
+
+Extract product fields using NVIDIA Nemotron VLM and, when policies are loaded, run policy retrieval plus compliance classification.
 
 **Endpoint**: `POST /vlm/analyze`  
 **Content-Type**: `multipart/form-data`
@@ -63,6 +164,10 @@ Extract product fields using NVIDIA Nemotron VLM (no image generation).
 | `locale` | string | No | Regional locale code (default: "en-US") |
 | `product_data` | JSON string | No | Existing product data to augment |
 | `brand_instructions` | string | No | Custom brand voice, tone, style, and taxonomy guidelines |
+
+When one or more policy PDFs have been loaded through `/policies`, this endpoint also:
+- retrieves semantically relevant normalized policy records from Milvus using the VLM title/description/categories/tags/colors
+- runs a compliance classifier against the analyzed product and the retrieved policy records
 
 ### Product Data Schema (Optional)
 
@@ -85,9 +190,27 @@ Extract product fields using NVIDIA Nemotron VLM (no image generation).
   "categories": ["string"],
   "tags": ["string"],
   "colors": ["string"],
-  "locale": "string"
+  "locale": "string",
+  "policy_decision": {
+    "status": "pass | fail",
+    "label": "string",
+    "summary": "string",
+    "matched_policies": [
+      {
+        "document_name": "string",
+        "policy_title": "string",
+        "rule_title": "string",
+        "reason": "string",
+        "evidence": ["string"]
+      }
+    ],
+    "warnings": ["string"],
+    "evidence_note": "string"
+  }
 }
 ```
+
+`policy_decision` is included only when the policy library contains at least one loaded document.
 
 ### Usage Examples
 
@@ -136,13 +259,21 @@ curl -X POST \
   "categories": ["accessories"],
   "tags": ["black leather", "gold accents", "evening bag", "rectangular shape"],
   "colors": ["black", "gold"],
-  "locale": "en-US"
+  "locale": "en-US",
+  "policy_decision": {
+    "status": "pass",
+    "label": "Policy Check Passed",
+    "summary": "No loaded policy appears applicable to this product.",
+    "matched_policies": [],
+    "warnings": [],
+    "evidence_note": "Policy retrieval did not return any candidate matches for this product."
+  }
 }
 ```
 
 ---
 
-## 2️⃣ Image Generation: `/generate/variation`
+## 3️⃣ Image Generation: `/generate/variation`
 
 Generate culturally-appropriate product variations using FLUX models based on VLM analysis results.
 
@@ -203,7 +334,7 @@ curl -X POST \
 
 ---
 
-## 3️⃣ 3D Asset Generation: `/generate/3d`
+## 4️⃣ 3D Asset Generation: `/generate/3d`
 
 Generate interactive 3D GLB models from 2D product images using Microsoft's TRELLIS model.
 

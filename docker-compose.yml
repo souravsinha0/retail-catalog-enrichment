@@ -22,9 +22,14 @@ services:
     container_name: catalog-enrichment-backend
     environment:
       - NGC_API_KEY=${NGC_API_KEY}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
+      - NVIDIA_API_BASE_URL=${NVIDIA_API_BASE_URL:-https://integrate.api.nvidia.com/v1}
       - HF_TOKEN=${HF_TOKEN}
+      - MILVUS_HOST=${MILVUS_HOST:-milvus-standalone}
+      - MILVUS_PORT=${MILVUS_PORT:-19530}
     volumes:
       - ./data/outputs:/app/data/outputs
+      - ./data/policies:/app/data/policies
       - ./shared/config:/app/shared/config:ro
     depends_on:
       - vlm-nim
@@ -105,6 +110,33 @@ services:
     networks:
       - catalog-network
 
+  # NVIDIA NIM - Embedding Model
+  embedqa:
+    image: nvcr.io/nim/nvidia/nv-embedqa-e5-v5:1.6
+    container_name: embedqa
+    ports:
+      - "8005:8000"
+    environment:
+      - NGC_API_KEY=${NGC_API_KEY}
+    volumes:
+      - ${LOCAL_NIM_CACHE:-~/.cache/nim}:/opt/nim/.cache
+    user: "${UID:-1000}"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['2']
+              capabilities: [gpu]
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - catalog-network
+
   # Trellis Model - 3D Asset Generation
   trellis-nim:
     image: nvcr.io/nim/microsoft/trellis:1.0.1
@@ -157,9 +189,9 @@ services:
 
 networks:
   catalog-network:
-    driver: bridge
+    external: true
+    name: catalog-network
 
 volumes:
   nim-cache:
     driver: local
-

@@ -49,6 +49,7 @@ A GenAI-powered catalog enrichment system that transforms basic product images i
 **AI Models:**
 - NVIDIA Nemotron VLM (vision-language model)
 - NVIDIA Nemotron LLM (prompt planning)
+- NVIDIA Embeddings (Policy Compliance)
 - FLUX models (image generation)
 - Microsoft TRELLIS (3D generation)
 
@@ -56,6 +57,7 @@ A GenAI-powered catalog enrichment system that transforms basic product images i
 - Docker & Docker Compose
 - NVIDIA NIM containers
 - HuggingFace model hosting
+- Milvus vector database for policy PDF retrieval
 
 ## Minimum System Requirements
 
@@ -67,10 +69,11 @@ For self-hosting the NIM microservices locally, the following GPU requirements a
 |-------|---------|-------------|-----------------|
 | Nemotron-Nano-12B-V2-VL | Vision-Language Analysis | 1× A100 | 1× H100 |
 | Nemotron-Nano-V3 | Prompt Planning (LLM) | 1× A100 | 1× H100 |
+| nv-embedqa | Embeddings (Policy Compliance) | 1× A100 | 1× H100 |
 | FLUX Kontext Dev | Image Generation | 1× H100 | 1× H100 |
-| Microsoft TRELLIS | 3D Asset Generation | 1× L40S | 1× L40S |
+| Microsoft TRELLIS | 3D Asset Generation | 1× L40S | 1× H100 |
 
-**Total recommended setup**: 3× H100 + 1× L40S (or 4× H100 for uniform configuration)
+**Total recommended setup**: 3× H100 + 1× L40S (or 4× H100 for uniform configuration). Embeddings model can be deploy on the same GPU as Flux or Trellis models.
 
 ### Deployment Options
 
@@ -146,6 +149,10 @@ Make sure you have accepted [https://huggingface.co/black-forest-labs/FLUX.1-Kon
    
    trellis:
      url: "http://localhost:8004/v1/infer"  # Your TRELLIS NIM endpoint
+
+   embeddings:
+     url: "http://localhost:8005/v1" #Your Embeddings NIM endpoint
+     model: "nvidia/nv-embedqa-e5-v5"
    ```
    
    See the **[Docker Deployment Guide](docs/DOCKER.md)** for instructions on deploying these NIMs.
@@ -166,7 +173,7 @@ The frontend at `http://localhost:3000`.
 
 ### Docker Deployment (Self-Hosted NIMs)
 
-The Docker deployment includes all required self-hosted NVIDIA NIM containers (Nemotron VLM, Nemotron LLM, FLUX, and TRELLIS). The `shared/config/config.yaml` is pre-configured with the correct service URLs for Docker networking.
+The Docker deployment includes all required self-hosted NVIDIA NIM containers (Nemotron VLM, Nemotron LLM, FLUX, and TRELLIS). If you want to use uploaded policy PDFs in the UI, start the companion Milvus stack from `docker-compose.rag.yml` as well. The `shared/config/config.yaml` is pre-configured with the correct service URLs for Docker networking.
 
 For complete Docker deployment instructions, see the **[Docker Deployment Guide](docs/DOCKER.md)**.
 
@@ -185,15 +192,27 @@ For complete Docker deployment instructions, see the **[Docker Deployment Guide]
    chmod a+w "$LOCAL_NIM_CACHE"
    ```
 
-3. **Start all services**:
+3. **Create the shared Docker network**:
    ```bash
-   docker-compose up -d
+   docker network create catalog-network || true
    ```
 
-4. **Access the application**:
+4. **Start the policy RAG stack**:
+   ```bash
+   docker compose -f docker-compose.rag.yml up -d
+   ```
+
+5. **Start the application stack**:
+   ```bash
+   docker compose up -d
+   ```
+
+6. **Access the application**:
    - Frontend: `http://localhost:3000`
    - Backend API: `http://localhost:8000`
    - Health Check: `http://localhost:8000/health`
+   - Milvus: `localhost:19530`
+   - MinIO Console: `http://localhost:9001`
 
 ## API Endpoints
 
@@ -211,7 +230,7 @@ For detailed API documentation with request/response examples, see **[API Docume
 
 ## License
 
-GOVERNING TERMS: The Blueprint scripts are governed by Apache License, Version 2.0, and enables use of separate open source and proprietary software governed by their respective licenses: [NVIDIA-Nemotron-Nano-12B-v2-VL](https://catalog.ngc.nvidia.com/orgs/nim/teams/nvidia/containers/nemotron-nano-12b-v2-vl?version=1), [Nemotron-Nano-V3](https://catalog.ngc.nvidia.com/orgs/nim/teams/nvidia/containers/nemotron-3-nano?version=1.7.0), [FLUX.1-Kontext-Dev](https://huggingface.co/black-forest-labs/FLUX.1-Kontext-dev/blob/main/LICENSE.md), and [Microsoft TRELLIS](https://catalog.ngc.nvidia.com/orgs/nim/teams/microsoft/containers/trellis?version=1).
+GOVERNING TERMS: The Blueprint scripts are governed by Apache License, Version 2.0, and enables use of separate open source and proprietary software governed by their respective licenses: [NVIDIA-Nemotron-Nano-12B-v2-VL](https://catalog.ngc.nvidia.com/orgs/nim/teams/nvidia/containers/nemotron-nano-12b-v2-vl?version=1), [Nemotron-Nano-V3](https://catalog.ngc.nvidia.com/orgs/nim/teams/nvidia/containers/nemotron-3-nano?version=1.7.0), [nv-embedqa-e5-v5](https://catalog.ngc.nvidia.com/orgs/nim/teams/nvidia/containers/nv-embedqa-e5-v5?version=latest), [FLUX.1-Kontext-Dev](https://huggingface.co/black-forest-labs/FLUX.1-Kontext-dev/blob/main/LICENSE.md), and [Microsoft TRELLIS](https://catalog.ngc.nvidia.com/orgs/nim/teams/microsoft/containers/trellis?version=1).
 
 ADDITIONAL INFORMATION: 
 FLUX.1-Kontext-Dev license: [https://huggingface.co/black-forest-labs/FLUX.1-Kontext-dev/blob/main/LICENSE.md](https://huggingface.co/black-forest-labs/FLUX.1-Kontext-dev/blob/main/LICENSE.md).

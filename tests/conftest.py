@@ -128,6 +128,52 @@ def sample_flux_plan() -> Dict[str, Any]:
 
 
 @pytest.fixture
+def sample_policy_summary() -> Dict[str, Any]:
+    """Sample normalized policy summary."""
+    return {
+        "document_name": "policy-a.pdf",
+        "policy_title": "Marketplace Policy A",
+        "summary": "Flags listings when required compliance markers are missing from the available evidence.",
+        "blocking_rules": [
+            {
+                "title": "Missing required compliance marker",
+                "conditions": ["The product is missing a required compliance marker from the available evidence."],
+                "signals": ["required marker absent", "listing evidence incomplete"]
+            }
+        ],
+        "permitted_rules": [
+            {
+                "title": "Required evidence present",
+                "conditions": ["The listing includes the required compliance marker."]
+            }
+        ],
+        "required_evidence": ["required compliance marker", "clear listing evidence"],
+        "notes": []
+    }
+
+
+@pytest.fixture
+def sample_policy_decision() -> Dict[str, Any]:
+    """Sample policy evaluation response."""
+    return {
+        "status": "fail",
+        "label": "Policy Check Failed",
+        "summary": "The listing is missing evidence required by one of the uploaded policy documents.",
+        "matched_policies": [
+            {
+                "document_name": "policy-a.pdf",
+                "policy_title": "Marketplace Policy A",
+                "rule_title": "Missing required compliance marker",
+                "reason": "The available listing evidence does not show the required marker defined by the uploaded policy.",
+                "evidence": ["required compliance marker", "required marker absent"]
+            }
+        ],
+        "warnings": [],
+        "evidence_note": "Decision based on the uploaded image and the generated catalog evidence."
+    }
+
+
+@pytest.fixture
 def mock_openai_completion():
     """Create a mock OpenAI completion response with streaming."""
     def create_mock_completion(content: str):
@@ -233,4 +279,3 @@ def invalid_config_dict() -> Dict[str, Any]:
             # Missing 'url' field
         }
     }
-

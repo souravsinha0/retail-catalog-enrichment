@@ -26,7 +26,9 @@ from fastapi.responses import JSONResponse, PlainTextResponse, Response
 import httpx
 from openai import APIConnectionError
 
-from backend.vlm import run_vlm_analysis
+from backend.policy import evaluate_policy_compliance
+from backend.policy_library import PolicyLibrary
+from backend.vlm import extract_vlm_observation, build_enriched_vlm_result
 from backend.image import generate_image_variation
 from backend.trellis import generate_3d_asset
 from backend.config import get_config
@@ -35,6 +37,7 @@ load_dotenv()
 
 logger = logging.getLogger("catalog_enrichment.api")
 VALID_LOCALES = {"en-US", "en-GB", "en-AU", "en-CA", "es-ES", "es-MX", "es-AR", "es-CO", "fr-FR", "fr-CA"}
+policy_library = PolicyLibrary()
 
 
 @asynccontextmanager
@@ -42,6 +45,7 @@ async def lifespan(app: FastAPI):
     if not logging.getLogger().handlers:
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s - %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    policy_library.initialize()
     logger.info("App startup complete")
     yield
 
@@ -172,7 +176,66 @@ async def vlm_analyze(
         image_bytes, content_type = validation_result
         
         logger.info(f"Running VLM analysis: locale={locale} mode={'augmentation' if product_json else 'generation'}")
-        result = run_vlm_analysis(image_bytes, content_type, locale, product_json, brand_instructions)
+        vlm_observation = await asyncio.to_thread(extract_vlm_observation, image_bytes, content_type)
+
+        enrichment_task = asyncio.to_thread(
+            build_enriched_vlm_result,
+            vlm_observation,
+            locale,
+            product_json,
+            brand_instructions,
+        )
+        retrieval_task = asyncio.to_thread(
+            policy_library.retrieve_context,
+            {
+                "title": vlm_observation.get("title", ""),
+                "description": vlm_observation.get("description", ""),
+                "categories": vlm_observation.get("categories", []),
+                "tags": vlm_observation.get("tags", []),
+                "colors": vlm_observation.get("colors", []),
+            },
+        )
+        result, policy_contexts = await asyncio.gather(enrichment_task, retrieval_task)
+        if policy_contexts:
+            logger.info("Policy retrieval returned %d candidate policy record(s); running compliance evaluation.", len(policy_contexts))
+            product_snapshot = {
+                "locale": locale,
+                "title": vlm_observation.get("title", ""),
+                "description": vlm_observation.get("description", ""),
+                "categories": vlm_observation.get("categories", []),
+                "tags": vlm_observation.get("tags", []),
+                "colors": vlm_observation.get("colors", []),
+                "generated_catalog_fields": {
+                    "title": result.get("title", ""),
+                    "description": result.get("description", ""),
+                    "categories": result.get("categories", []),
+                    "tags": result.get("tags", []),
+                    "colors": result.get("colors", []),
+                },
+                "product_data": product_json or {},
+            }
+            result["policy_decision"] = await asyncio.to_thread(
+                evaluate_policy_compliance,
+                product_snapshot,
+                policy_contexts,
+                locale,
+            )
+            logger.info(
+                "Policy evaluation complete: status=%s matches=%d warnings=%d",
+                result["policy_decision"].get("status"),
+                len(result["policy_decision"].get("matched_policies", [])),
+                len(result["policy_decision"].get("warnings", [])),
+            )
+        elif policy_library.list_documents():
+            logger.info("Policy retrieval returned no candidates; treating loaded policies as not relevant to this product.")
+            result["policy_decision"] = {
+                "status": "pass",
+                "label": "Policy Check Passed",
+                "summary": "No loaded policy appears applicable to this product.",
+                "matched_policies": [],
+                "warnings": [],
+                "evidence_note": "Policy retrieval did not return any candidate matches for this product.",
+            }
         
         payload = {
             "title": result.get("title", ""),
@@ -185,6 +248,8 @@ async def vlm_analyze(
         
         if result.get("enhanced_product"):
             payload["enhanced_product"] = result["enhanced_product"]
+        if result.get("policy_decision"):
+            payload["policy_decision"] = result["policy_decision"]
         
         logger.info(f"/vlm/analyze success: title_len={len(payload['title'])} desc_len={len(payload['description'])} locale={locale}")
         return JSONResponse(payload)
@@ -196,6 +261,45 @@ async def vlm_analyze(
         }, status_code=503)
     except Exception as exc:
         logger.exception(f"/vlm/analyze exception: {exc}")
+        return JSONResponse({"detail": str(exc)}, status_code=500)
+
+
+@app.get("/policies")
+async def list_policies() -> JSONResponse:
+    try:
+        return JSONResponse({"documents": policy_library.list_documents()})
+    except Exception as exc:
+        logger.exception("/policies list exception: %s", exc)
+        return JSONResponse({"detail": str(exc)}, status_code=500)
+
+
+@app.post("/policies")
+async def upload_policies(
+    files: list[UploadFile] = File(...),
+    locale: str = Form("en-US"),
+) -> JSONResponse:
+    try:
+        if locale not in VALID_LOCALES:
+            return JSONResponse({"detail": f"Invalid locale. Supported locales: {sorted(VALID_LOCALES)}"}, status_code=400)
+
+        uploads, error_response = await _validate_policy_uploads(files, "/policies")
+        if error_response:
+            return error_response
+
+        results = policy_library.ingest_documents(uploads, locale=locale)
+        return JSONResponse({"documents": policy_library.list_documents(), "results": results})
+    except Exception as exc:
+        logger.exception("/policies upload exception: %s", exc)
+        return JSONResponse({"detail": str(exc)}, status_code=500)
+
+
+@app.delete("/policies")
+async def clear_policies() -> JSONResponse:
+    try:
+        policy_library.clear()
+        return JSONResponse({"status": "ok"})
+    except Exception as exc:
+        logger.exception("/policies clear exception: %s", exc)
         return JSONResponse({"detail": str(exc)}, status_code=500)
 
 
@@ -286,6 +390,42 @@ async def _validate_image(image: UploadFile, endpoint: str):
         return None, JSONResponse({"detail": "File must be an image"}, status_code=400)
     
     return (image_bytes, content_type), None
+
+
+async def _validate_policy_uploads(policy_files: list[UploadFile], endpoint: str):
+    if not policy_files:
+        return None, JSONResponse({"detail": "At least one PDF file is required"}, status_code=400)
+
+    uploads = []
+    invalid_files = []
+
+    for policy_file in policy_files:
+        logger.info(
+            "POST %s policy filename=%s content_type=%s",
+            endpoint,
+            getattr(policy_file, "filename", None),
+            getattr(policy_file, "content_type", None),
+        )
+
+        filename = getattr(policy_file, "filename", None) or "policy.pdf"
+        content_type = getattr(policy_file, "content_type", None) or "application/pdf"
+        if content_type != "application/pdf" and not filename.lower().endswith(".pdf"):
+            invalid_files.append(filename)
+            continue
+
+        pdf_bytes = await policy_file.read()
+        if not pdf_bytes:
+            invalid_files.append(filename)
+            continue
+        uploads.append({"filename": filename, "bytes": pdf_bytes})
+
+    if invalid_files:
+        return None, JSONResponse(
+            {"detail": f"Policy files must be non-empty PDFs. Invalid files: {', '.join(sorted(invalid_files))}"},
+            status_code=400,
+        )
+
+    return uploads, None
 
 
 @app.post("/generate/3d")
