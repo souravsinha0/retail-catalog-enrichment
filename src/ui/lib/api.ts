@@ -1,4 +1,4 @@
-import { ProductFields, AugmentedData, NIMHealthStatus } from '../types';
+import { ProductFields, AugmentedData, NIMHealthStatus, PolicyDocument, PolicyUploadResult } from '../types';
 
 const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
 
@@ -30,7 +30,52 @@ export async function analyzeImage({ file, locale, productData, brandInstruction
     throw new Error(error.detail || 'Failed to analyze image');
   }
 
+  const data = await response.json();
+  return {
+    ...data,
+    policyDecision: data.policy_decision
+  };
+}
+
+export async function listPolicies(): Promise<PolicyDocument[]> {
+  const response = await fetch(`${API_BASE}/policies`, { method: 'GET' });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to load policy library');
+  }
+
+  const data = await response.json();
+  return data.documents || [];
+}
+
+export async function uploadPolicies(files: File[], locale: string): Promise<{ documents: PolicyDocument[]; results: PolicyUploadResult[] }> {
+  const formData = new FormData();
+  formData.append('locale', locale);
+  for (const file of files) {
+    formData.append('files', file);
+  }
+
+  const response = await fetch(`${API_BASE}/policies`, {
+    method: 'POST',
+    body: formData
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to upload policy PDFs');
+  }
+
   return response.json();
+}
+
+export async function clearPolicies(): Promise<void> {
+  const response = await fetch(`${API_BASE}/policies`, { method: 'DELETE' });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to clear policy library');
+  }
 }
 
 interface GenerateVariationParams {
@@ -68,11 +113,7 @@ export async function generateImageVariation(params: GenerateVariationParams): P
   }
 
   const data = await response.json();
-  
-  if (data.quality_issues && data.quality_issues.length > 0) {
-    console.log(`[Quality Check] Score: ${data.quality_score}% - Issues found:`, data.quality_issues);
-  }
-  
+
   return {
     imageUrl: data.generated_image_b64 ? `data:image/png;base64,${data.generated_image_b64}` : null,
     qualityScore: data.quality_score !== undefined && data.quality_score !== null ? data.quality_score : null,
@@ -85,9 +126,6 @@ export async function generate3DModel(file: File): Promise<string | null> {
   formData.append('image', file);
   formData.append('return_json', 'true');
 
-  console.log('[3D API] Starting 3D model generation request...');
-  const startTime = Date.now();
-
   const response = await fetch(`${API_BASE}/generate/3d`, {
     method: 'POST',
     body: formData,
@@ -95,33 +133,15 @@ export async function generate3DModel(file: File): Promise<string | null> {
     signal: AbortSignal.timeout(120000)
   });
 
-  const elapsed = Date.now() - startTime;
-  console.log(`[3D API] Response received in ${elapsed}ms, status: ${response.status}`);
-
   if (!response.ok) {
     const error = await response.json();
-    console.error('[3D API] Error response:', error);
     throw new Error(error.detail || 'Failed to generate 3D model');
   }
-
-  const contentLength = response.headers.get('content-length');
-  const contentType = response.headers.get('content-type');
-  console.log(`[3D API] Response headers - Content-Type: ${contentType}, Content-Length: ${contentLength}`);
 
   let data;
   try {
     data = await response.json();
-    console.log(`[3D API] JSON parsed successfully, has glb_base64: ${!!data.glb_base64}, artifact_id: ${data.artifact_id}`);
-    
-    if (data.glb_base64) {
-      const base64Length = data.glb_base64.length;
-      const estimatedSizeMB = (base64Length * 0.75) / (1024 * 1024);
-      console.log(`[3D API] GLB base64 length: ${base64Length} chars (~${estimatedSizeMB.toFixed(2)} MB decoded)`);
-    } else {
-      console.error('[3D API] Response missing glb_base64 field. Full response:', data);
-    }
-  } catch (parseError) {
-    console.error('[3D API] Failed to parse JSON response:', parseError);
+  } catch {
     throw new Error('Failed to parse 3D model response');
   }
 
@@ -188,4 +208,3 @@ export async function checkNIMHealth(): Promise<NIMHealthStatus> {
     };
   }
 }
-

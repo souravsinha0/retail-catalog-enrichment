@@ -1,6 +1,103 @@
-import { Card, Stack, Text, FormField, TextInput, TextArea, Spinner } from '@/kui-foundations-react-external';
-import { ProductFields, AugmentedData } from '@/types';
+import { Card, Stack, Text, Flex, FormField, TextInput, TextArea } from '@/kui-foundations-react-external';
+import { ProductFields, AugmentedData, PolicyDecision } from '@/types';
 import { ProcessingSteps } from './ProcessingSteps';
+
+function PolicyComplianceCard({ decision }: { decision: PolicyDecision }) {
+  const isFail = decision.status === 'fail';
+
+  const colors = isFail
+    ? {
+        border: 'rgba(255, 84, 89, 0.30)',
+        bg: 'rgba(255, 84, 89, 0.06)',
+        icon: 'rgba(255, 84, 89, 0.12)',
+        iconStroke: '#FF5459',
+        accent: '#FF5459',
+        badgeText: '#FFB4B6',
+        badgeBg: 'rgba(255, 84, 89, 0.16)',
+        badgeBorder: 'rgba(255, 84, 89, 0.35)',
+        mutedText: 'rgba(255, 180, 182, 0.7)',
+      }
+    : {
+        border: 'rgba(118, 185, 0, 0.30)',
+        bg: 'rgba(118, 185, 0, 0.06)',
+        icon: 'rgba(118, 185, 0, 0.12)',
+        iconStroke: '#76B900',
+        accent: '#76B900',
+        badgeText: '#B8E86B',
+        badgeBg: 'rgba(118, 185, 0, 0.16)',
+        badgeBorder: 'rgba(118, 185, 0, 0.35)',
+        mutedText: 'rgba(184, 232, 107, 0.7)',
+      };
+
+  return (
+    <div
+      style={{
+        border: `1px solid ${colors.border}`,
+        borderRadius: '16px',
+        background: colors.bg,
+        padding: '20px',
+      }}
+    >
+      <div style={{ display: 'flex', gap: '14px', alignItems: 'flex-start' }}>
+        <div
+          style={{
+            width: '40px',
+            height: '40px',
+            borderRadius: '12px',
+            background: colors.icon,
+            display: 'grid',
+            placeItems: 'center',
+            flexShrink: 0,
+          }}
+        >
+          {isFail ? (
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+              <path d="M8.57 3.22L1.52 14.5a1.67 1.67 0 001.43 2.5h14.1a1.67 1.67 0 001.43-2.5L11.43 3.22a1.67 1.67 0 00-2.86 0z" stroke={colors.iconStroke} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M10 7.5v3.33M10 14.17h.008" stroke={colors.iconStroke} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          ) : (
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+              <path d="M10 18.33a8.33 8.33 0 100-16.66 8.33 8.33 0 000 16.66z" stroke={colors.iconStroke} strokeWidth="1.5" />
+              <path d="M6.67 10l2.5 2.5 4.16-5" stroke={colors.iconStroke} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
+        </div>
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Flex justify="between" align="start" style={{ marginBottom: '8px' }}>
+            <Stack gap="1">
+              <Text kind="body/regular/sm" style={{ color: colors.mutedText, letterSpacing: '0.08em', textTransform: 'uppercase', fontSize: '11px' }}>
+                Policy Compliance
+              </Text>
+              <Text kind="body/semibold/md" className="text-primary">
+                {decision.label}
+              </Text>
+            </Stack>
+            <span
+              style={{
+                color: colors.badgeText,
+                backgroundColor: colors.badgeBg,
+                border: `1px solid ${colors.badgeBorder}`,
+                padding: '6px 12px',
+                borderRadius: '999px',
+                fontSize: '12px',
+                fontWeight: 600,
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+              }}
+            >
+              {isFail ? 'Does not comply' : 'Complies'}
+            </span>
+          </Flex>
+
+          <Text kind="body/regular/sm" className="text-subtle" style={{ lineHeight: 1.5 }}>
+            {decision.summary}
+          </Text>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 interface Props {
   fields: ProductFields;
@@ -17,13 +114,17 @@ export function FieldsCard({ fields, augmentedData, isAnalyzing, isGenerating, o
     <Card>
       <Stack gap="6">
         <Text kind="title/md" className="text-primary">Fields</Text>
-        
+
         {isAnalyzing ? (
           <div>
             <ProcessingSteps isAnalyzing={isAnalyzing} hasAugmentedData={!!augmentedData} />
           </div>
         ) : (
           <Stack gap="4">
+            {augmentedData?.policyDecision && (
+              <PolicyComplianceCard decision={augmentedData.policyDecision} />
+            )}
+
             <div>
               <FormField slotLabel="Title">
                 {(args: any) => (
@@ -150,4 +251,3 @@ export function FieldsCard({ fields, augmentedData, isAnalyzing, isGenerating, o
     </Card>
   );
 }
-

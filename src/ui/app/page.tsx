@@ -1,15 +1,16 @@
 'use client';
 
 import { Stack } from '@/kui-foundations-react-external';
-import { useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Nebula } from '@/kui-foundations-react-external/nebula';
 import { Header } from '@/components/Header';
 import { ImageUploadCard } from '@/components/ImageUploadCard';
 import { FieldsCard } from '@/components/FieldsCard';
+import { AdvancedOptionsCard } from '@/components/AdvancedOptionsCard';
 import { GeneratedVariationsSection } from '@/components/GeneratedVariationsSection';
-import { ProductFields, AugmentedData, ImageMetadata, SUPPORTED_LOCALES } from '@/types';
-import { analyzeImage, generateImageVariation, generate3DModel, prepareProductData } from '@/lib/api';
-import { formatFileSize } from '@/lib/utils';
+import { ProductFields, AugmentedData, PolicyDocument, PolicyUploadResult, SUPPORTED_LOCALES } from '@/types';
+import { analyzeImage, clearPolicies, generateImageVariation, generate3DModel, listPolicies, prepareProductData, uploadPolicies } from '@/lib/api';
+
 
 function Home() {
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
@@ -17,8 +18,11 @@ function Home() {
   const [isUploading, setIsUploading] = useState(false);
   const [isAnalyzingFields, setIsAnalyzingFields] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
-  const [imageMetadata, setImageMetadata] = useState<ImageMetadata | null>(null);
   const [locale, setLocale] = useState<string>('en-US');
+  const [loadedPolicies, setLoadedPolicies] = useState<PolicyDocument[]>([]);
+  const [policyUploadResults, setPolicyUploadResults] = useState<PolicyUploadResult[]>([]);
+  const [policyUploadError, setPolicyUploadError] = useState<string | null>(null);
+  const [isUploadingPolicies, setIsUploadingPolicies] = useState(false);
   const [fields, setFields] = useState<ProductFields>({
     title: '',
     description: '',
@@ -38,6 +42,11 @@ function Home() {
   const [enableVariation2, setEnableVariation2] = useState<boolean>(true);
   const [enable3D, setEnable3D] = useState<boolean>(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const policyFileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    void refreshPolicies({ silent: true });
+  }, []);
 
   const handleFileUpload = async (file: File) => {
     if (!['image/png', 'image/jpeg', 'image/jpg'].includes(file.type)) {
@@ -56,11 +65,6 @@ function Home() {
     reader.onload = (e) => {
       const img = new window.Image();
       img.onload = () => {
-        setImageMetadata({
-          name: file.name,
-          size: formatFileSize(file.size),
-          dimensions: `${img.width} × ${img.height}`
-        });
         setIsUploading(false);
       };
       img.src = e.target?.result as string;
@@ -84,7 +88,6 @@ function Home() {
   const handleReset = () => {
     setUploadedImage(null);
     setUploadedFile(null);
-    setImageMetadata(null);
     setAugmentedData(null);
     setGeneratedImages([null, null]);
     setQualityScores([null, null]);
@@ -92,11 +95,79 @@ function Home() {
     setGenerated3DModel(null);
     setModel3DError(null);
     setLocale('en-US');
+    setPolicyUploadResults([]);
+    setPolicyUploadError(null);
     setFields({ title: '', description: '', color: '', categories: '', tags: '', price: '', brandInstructions: '' });
     setEnableVariation1(true);
     setEnableVariation2(true);
     setEnable3D(true);
     if (fileInputRef.current) fileInputRef.current.value = '';
+    if (policyFileInputRef.current) policyFileInputRef.current.value = '';
+  };
+
+  const refreshPolicies = async ({ silent = false }: { silent?: boolean } = {}) => {
+    try {
+      const documents = await listPolicies();
+      setLoadedPolicies(documents);
+      if (!silent) {
+        setPolicyUploadError(null);
+      }
+    } catch (error) {
+      console.error('Error loading policy library:', error);
+      setLoadedPolicies([]);
+      if (!silent) {
+        setPolicyUploadError(error instanceof Error ? error.message : 'Failed to load policy library');
+      }
+    }
+  };
+
+  const handlePolicyFilesUpload = async (files: FileList | null) => {
+    const selectedFiles = Array.from(files || []);
+    if (selectedFiles.length === 0) {
+      return;
+    }
+
+    const invalidFile = selectedFiles.find((file) => file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf'));
+    if (invalidFile) {
+      setPolicyUploadError(`"${invalidFile.name}" is not a PDF.`);
+      return;
+    }
+
+    try {
+      setIsUploadingPolicies(true);
+      setPolicyUploadError(null);
+      const response = await uploadPolicies(selectedFiles, locale);
+      setLoadedPolicies(response.documents || []);
+      setPolicyUploadResults(response.results || []);
+    } catch (error) {
+      console.error('Error uploading policy PDFs:', error);
+      setPolicyUploadError(error instanceof Error ? error.message : 'Failed to upload policy PDFs');
+    } finally {
+      setIsUploadingPolicies(false);
+      if (policyFileInputRef.current) {
+        policyFileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleClearPolicyLibrary = async () => {
+    if (!window.confirm('This will clear all loaded policy PDFs and embeddings. Continue?')) {
+      return;
+    }
+
+    try {
+      setIsUploadingPolicies(true);
+      setPolicyUploadError(null);
+      await clearPolicies();
+      setLoadedPolicies([]);
+      setPolicyUploadResults([]);
+      setAugmentedData(prev => prev ? { ...prev, policyDecision: undefined } : prev);
+    } catch (error) {
+      console.error('Error clearing policy library:', error);
+      setPolicyUploadError(error instanceof Error ? error.message : 'Failed to clear policy library');
+    } finally {
+      setIsUploadingPolicies(false);
+    }
   };
 
   const handleGenerate = async () => {
@@ -117,7 +188,7 @@ function Home() {
         file: uploadedFile, 
         locale, 
         productData,
-        brandInstructions: fields.brandInstructions 
+        brandInstructions: fields.brandInstructions
       });
       
       setAugmentedData({
@@ -125,7 +196,8 @@ function Home() {
         description: analyzeData.description || '',
         colors: analyzeData.colors || [],
         tags: analyzeData.tags || [],
-        categories: analyzeData.categories || []
+        categories: analyzeData.categories || [],
+        policyDecision: analyzeData.policyDecision
       });
       setIsAnalyzingFields(false);
 
@@ -152,9 +224,6 @@ function Home() {
               setGeneratedImages(prev => [result.imageUrl, prev[1]]);
               setQualityScores(prev => [result.qualityScore, prev[1]]);
               setQualityIssues(prev => [result.qualityIssues, prev[1]]);
-              if (result.qualityIssues && result.qualityIssues.length > 0) {
-                console.log('[Variation 1] Quality issues:', result.qualityIssues);
-              }
             } catch (error) {
               console.error('Error generating variation 1:', error);
             }
@@ -170,9 +239,6 @@ function Home() {
               setGeneratedImages(prev => [prev[0], result.imageUrl]);
               setQualityScores(prev => [prev[0], result.qualityScore]);
               setQualityIssues(prev => [prev[0], result.qualityIssues]);
-              if (result.qualityIssues && result.qualityIssues.length > 0) {
-                console.log('[Variation 2] Quality issues:', result.qualityIssues);
-              }
             } catch (error) {
               console.error('Error generating variation 2:', error);
             }
@@ -280,28 +346,29 @@ function Home() {
               }}
               style={{ display: 'none' }}
             />
+            <input
+              ref={policyFileInputRef}
+              type="file"
+              accept="application/pdf,.pdf"
+              multiple
+              onChange={(e) => {
+                void handlePolicyFilesUpload(e.target.files);
+              }}
+              style={{ display: 'none' }}
+            />
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px', padding: '0 16px' }}>
               <ImageUploadCard
                 uploadedImage={uploadedImage}
                 isUploading={isUploading}
-                imageMetadata={imageMetadata}
                 locale={locale}
                 localeOptions={SUPPORTED_LOCALES}
                 isAnalyzingFields={isAnalyzingFields}
                 isGeneratingImage={isGeneratingImage}
-                brandInstructions={fields.brandInstructions}
-                enableVariation1={enableVariation1}
-                enableVariation2={enableVariation2}
-                enable3D={enable3D}
                 onFileSelect={() => fileInputRef.current?.click()}
                 onDragOver={handleDragOver}
                 onDrop={handleDrop}
                 onLocaleChange={setLocale}
-                onBrandInstructionsChange={(value) => setFields(prev => ({ ...prev, brandInstructions: value }))}
-                onEnableVariation1Change={setEnableVariation1}
-                onEnableVariation2Change={setEnableVariation2}
-                onEnable3DChange={setEnable3D}
                 onGenerate={handleGenerate}
                 onReset={handleReset}
               />
@@ -312,6 +379,29 @@ function Home() {
                 isAnalyzing={isAnalyzingFields}
                 isGenerating={isGeneratingImage}
                 onFieldChange={(field, value) => setFields(prev => ({ ...prev, [field]: value }))}
+              />
+            </div>
+
+            <div style={{ padding: '0 16px' }}>
+              <AdvancedOptionsCard
+                brandInstructions={fields.brandInstructions}
+                loadedPolicies={loadedPolicies}
+                policyUploadResults={policyUploadResults}
+                policyUploadError={policyUploadError}
+                isUploadingPolicies={isUploadingPolicies}
+                enableVariation1={enableVariation1}
+                enableVariation2={enableVariation2}
+                enable3D={enable3D}
+                isAnalyzingFields={isAnalyzingFields}
+                isGeneratingImage={isGeneratingImage}
+                onBrandInstructionsChange={(value) => setFields(prev => ({ ...prev, brandInstructions: value }))}
+                onPolicyFileSelect={() => policyFileInputRef.current?.click()}
+                onClearPolicyLibrary={() => {
+                  void handleClearPolicyLibrary();
+                }}
+                onEnableVariation1Change={setEnableVariation1}
+                onEnableVariation2Change={setEnableVariation2}
+                onEnable3DChange={setEnable3D}
               />
             </div>
 

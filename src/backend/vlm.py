@@ -17,7 +17,7 @@ import os
 import json
 import base64
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -290,7 +290,7 @@ def _call_vlm(image_bytes: bytes, content_type: str) -> Dict[str, Any]:
 
 TASK:
 1. Describe the product itself - its materials, design, and features
-2. Include any visible brand names or product text shown on the item
+2. Include any visible brand names, packaging text, ingredient text, regulatory labels, ratings, warnings, or other product text shown on the item
 3. Write in ENGLISH - be accurate about what you see
 
 CATEGORIES - Choose ONLY from this allowed set: {categories_str}
@@ -333,12 +333,59 @@ Return ONLY valid JSON:
         return parsed
     return {"title": "", "description": text.strip(), "categories": ["uncategorized"], "tags": [], "colors": []}
 
+
+def extract_vlm_observation(image_bytes: bytes, content_type: str) -> Dict[str, Any]:
+    """Run only the raw VLM observation step."""
+    if not image_bytes:
+        raise ValueError("image_bytes is required")
+    if not isinstance(content_type, str) or not content_type.startswith("image/"):
+        raise ValueError("content_type must be an image/* MIME type")
+
+    vlm_result = _call_vlm(image_bytes, content_type)
+    logger.info(
+        "VLM analysis complete (English): title_len=%d desc_len=%d categories=%s",
+        len(vlm_result.get("title", "")),
+        len(vlm_result.get("description", "")),
+        vlm_result.get("categories", []),
+    )
+    return vlm_result
+
+
+def build_enriched_vlm_result(
+    vlm_result: Dict[str, Any],
+    locale: str = "en-US",
+    product_data: Optional[Dict[str, Any]] = None,
+    brand_instructions: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Build enriched catalog fields from a raw VLM observation."""
+    enhanced = _call_nemotron_enhance(vlm_result, product_data, locale, brand_instructions)
+    logger.info("Nemotron enhance complete: keys=%s", list(enhanced.keys()))
+
+    categories = (
+        enhanced.get("categories")
+        if enhanced.get("categories") and isinstance(enhanced.get("categories"), list)
+        else vlm_result.get("categories", ["uncategorized"])
+    )
+
+    result = {
+        "title": enhanced.get("title", vlm_result.get("title", "")),
+        "description": enhanced.get("description", vlm_result.get("description", "")),
+        "categories": categories,
+        "tags": enhanced.get("tags", vlm_result.get("tags", [])),
+        "colors": enhanced.get("colors", vlm_result.get("colors", [])),
+    }
+
+    if product_data:
+        result["enhanced_product"] = {**product_data, **enhanced}
+
+    return result
+
 def run_vlm_analysis(
     image_bytes: bytes,
     content_type: str,
     locale: str = "en-US",
     product_data: Optional[Dict[str, Any]] = None,
-    brand_instructions: Optional[str] = None
+    brand_instructions: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Run VLM analysis on an image to extract product fields.
@@ -352,40 +399,10 @@ def run_vlm_analysis(
         locale: Target locale for analysis
         product_data: Optional existing product data to augment
         brand_instructions: Optional brand-specific tone/style instructions
-    
+
     Returns:
-        Dict with title, description, categories, tags, colors, enhanced_product (if augmentation)
+        Dict with title, description, categories, tags, colors, and enhanced_product (if augmentation)
     """
     logger.info("Running VLM analysis: locale=%s mode=%s brand_instructions=%s", locale, "augmentation" if product_data else "generation", bool(brand_instructions))
-    
-    if not image_bytes:
-        raise ValueError("image_bytes is required")
-    if not isinstance(content_type, str) or not content_type.startswith("image/"):
-        raise ValueError("content_type must be an image/* MIME type")
-    
-    # Run VLM analysis (always in English)
-    vlm_result = _call_vlm(image_bytes, content_type)
-    logger.info("VLM analysis complete (English): title_len=%d desc_len=%d categories=%s",
-                len(vlm_result.get("title", "")), len(vlm_result.get("description", "")), vlm_result.get("categories", []))
-    
-    # Always enhance VLM output with Nemotron (handles all scenarios)
-    enhanced = _call_nemotron_enhance(vlm_result, product_data, locale, brand_instructions)
-    logger.info("Nemotron enhance complete: keys=%s", list(enhanced.keys()))
-    
-    categories = (enhanced.get("categories") if enhanced.get("categories") and isinstance(enhanced.get("categories"), list)
-                 else vlm_result.get("categories", ["uncategorized"]))
-    
-    result = {
-        "title": enhanced.get("title", vlm_result.get("title", "")),
-        "description": enhanced.get("description", vlm_result.get("description", "")),
-        "categories": categories,
-        "tags": enhanced.get("tags", vlm_result.get("tags", [])),
-        "colors": enhanced.get("colors", vlm_result.get("colors", []))
-    }
-    
-    # If product data was provided, merge enhanced fields back into original product_data
-    # to preserve untouched fields (price, SKU, specs, etc.)
-    if product_data:
-        result["enhanced_product"] = {**product_data, **enhanced}
-    
-    return result
+    vlm_result = extract_vlm_observation(image_bytes, content_type)
+    return build_enriched_vlm_result(vlm_result, locale, product_data, brand_instructions)

@@ -12,6 +12,8 @@ The application consists of the following services:
 - **LLM NIM** (Port 8002): Large Language Model for text generation
 - **Flux NIM** (Port 8003): Image generation model for product variations
 - **Trellis NIM** (Port 8004): 3D asset generation model
+- **Embeddings NIM** (Post 8005): Embeddings for policy compliance
+- **Milvus Stack** (Ports 19530, 9091, 9001): Persistent vector search for loaded policy PDFs
 
 ## Prerequisites
 
@@ -43,12 +45,19 @@ mkdir -p "$LOCAL_NIM_CACHE"
 chmod a+w "$LOCAL_NIM_CACHE"
 ```
 
+### 3. Create Shared Docker Network
+
+```bash
+docker network create catalog-network || true
+```
+
 ## Running the Application
 
 ### Start All Services
 
 ```bash
 docker-compose up -d
+docker compose -f docker-compose.rag.yml up -d
 ```
 
 ### Start Specific Services
@@ -62,6 +71,9 @@ docker-compose up -d vlm-nim
 
 # Start all NIM models
 docker-compose up -d vlm-nim llm-nim flux-nim trellis-nim
+
+# Start the persistent policy RAG stack
+docker compose -f docker-compose.rag.yml up -d
 ```
 
 ### View Logs
@@ -73,6 +85,7 @@ docker-compose logs -f
 # Specific service
 docker-compose logs -f backend
 docker-compose logs -f frontend
+docker compose -f docker-compose.rag.yml logs -f milvus-standalone
 ```
 
 ### Stop Services
@@ -83,6 +96,7 @@ docker-compose down
 
 # Stop and remove volumes
 docker-compose down -v
+docker compose -f docker-compose.rag.yml down -v
 ```
 
 ## Building Images
@@ -113,6 +127,9 @@ Once all services are running:
 - **Frontend UI**: http://localhost:3000
 - **Backend API**: http://localhost:8000
 - **Health Check**: http://localhost:8000/health
+- **Milvus gRPC**: localhost:19530
+- **Milvus health**: localhost:9091
+- **MinIO Console**: http://localhost:9001
 
 ## GPU Configuration
 
@@ -155,6 +172,7 @@ docker-compose ps
 ```bash
 docker-compose logs backend
 docker-compose logs vlm-nim
+docker compose -f docker-compose.rag.yml logs milvus-standalone
 ```
 
 ### Restart a Service
@@ -177,6 +195,7 @@ docker-compose up -d
 
 ```bash
 docker-compose down --rmi all
+docker compose -f docker-compose.rag.yml down -v
 ```
 
 ### Clean Up Cache
@@ -184,4 +203,3 @@ docker-compose down --rmi all
 ```bash
 rm -rf ~/.cache/nim/*
 ```
-

@@ -22,7 +22,7 @@ import io
 import json
 import pytest
 from fastapi import UploadFile
-from backend.main import _validate_image, VALID_LOCALES
+from backend.main import _validate_image, _validate_policy_uploads, VALID_LOCALES
 
 
 class TestValidateImage:
@@ -145,6 +145,54 @@ class TestValidateImage:
             assert result is not None
             _, returned_content_type = result
             assert returned_content_type == content_type
+
+
+class TestValidatePolicyUploads:
+    """Tests for persistent policy PDF upload validation helper."""
+
+    @pytest.mark.asyncio
+    async def test_validate_policy_uploads_accepts_valid_pdf(self):
+        from unittest.mock import Mock, AsyncMock
+
+        upload_file = Mock(spec=UploadFile)
+        upload_file.filename = "policy.pdf"
+        upload_file.content_type = "application/pdf"
+        upload_file.read = AsyncMock(return_value=b"%PDF-test")
+
+        result, error = await _validate_policy_uploads([upload_file], "/test")
+
+        assert error is None
+        assert result == [{"filename": "policy.pdf", "bytes": b"%PDF-test"}]
+
+    @pytest.mark.asyncio
+    async def test_validate_policy_uploads_rejects_non_pdf(self):
+        from unittest.mock import Mock, AsyncMock
+
+        upload_file = Mock(spec=UploadFile)
+        upload_file.filename = "policy.txt"
+        upload_file.content_type = "text/plain"
+        upload_file.read = AsyncMock(return_value=b"not a pdf")
+
+        result, error = await _validate_policy_uploads([upload_file], "/test")
+
+        assert result is None
+        assert error is not None
+        assert error.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_validate_policy_uploads_rejects_empty_pdf(self):
+        from unittest.mock import Mock, AsyncMock
+
+        empty_file = Mock(spec=UploadFile)
+        empty_file.filename = "empty.pdf"
+        empty_file.content_type = "application/pdf"
+        empty_file.read = AsyncMock(return_value=b"")
+
+        result, error = await _validate_policy_uploads([empty_file], "/test")
+
+        assert result is None
+        assert error is not None
+        assert error.status_code == 400
 
 
 class TestLocaleValidation:
@@ -330,4 +378,3 @@ class TestColorsValidation:
         assert isinstance(colors, list)
         assert len(colors) == 1
         assert colors[0] == "red"
-

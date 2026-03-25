@@ -26,6 +26,8 @@ from backend.vlm import (
     _call_nemotron_enhance_vlm,
     _call_nemotron_apply_branding,
     _call_nemotron_enhance,
+    extract_vlm_observation,
+    build_enriched_vlm_result,
     run_vlm_analysis
 )
 
@@ -510,3 +512,48 @@ class TestRunVLMAnalysis:
         
         assert "content_type must be an image" in str(exc_info.value)
 
+    @patch('backend.vlm._call_nemotron_enhance')
+    @patch('backend.vlm._call_vlm')
+    def test_run_vlm_analysis_returns_enriched_fields_without_policy_evaluation(
+        self,
+        mock_call_vlm,
+        mock_enhance,
+        sample_image_bytes,
+        sample_vlm_response,
+    ):
+        """Test VLM analysis returns enriched fields and leaves policy checks to the API layer."""
+        mock_call_vlm.return_value = sample_vlm_response
+        mock_enhance.return_value = sample_vlm_response
+
+        result = run_vlm_analysis(
+            sample_image_bytes,
+            "image/png",
+            "en-US",
+            None,
+            None,
+        )
+
+        assert result["title"] == sample_vlm_response["title"]
+        assert "policy_decision" not in result
+
+
+class TestSplitVLMFlow:
+    @patch('backend.vlm._call_vlm')
+    def test_extract_vlm_observation_returns_raw_vlm_output(self, mock_call_vlm, sample_image_bytes, sample_vlm_response):
+        mock_call_vlm.return_value = sample_vlm_response
+
+        result = extract_vlm_observation(sample_image_bytes, "image/png")
+
+        assert result == sample_vlm_response
+        mock_call_vlm.assert_called_once_with(sample_image_bytes, "image/png")
+
+    @patch('backend.vlm._call_nemotron_enhance')
+    def test_build_enriched_vlm_result_uses_existing_vlm_observation(self, mock_enhance, sample_vlm_response):
+        enhanced_response = sample_vlm_response.copy()
+        enhanced_response["title"] = "Enhanced Title"
+        mock_enhance.return_value = enhanced_response
+
+        result = build_enriched_vlm_result(sample_vlm_response, "en-US", None, None)
+
+        assert result["title"] == "Enhanced Title"
+        assert "enhanced_product" not in result
