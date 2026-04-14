@@ -83,22 +83,22 @@ def _call_nemotron_filter_user_data(
     product_json = json.dumps(product_data, indent=2, ensure_ascii=False)
     vlm_categories = json.dumps(vlm_output.get("categories", []))
 
-    prompt = f"""You are a product data quality filter. Your ONLY job is to remove irrelevant text from user-provided product data by comparing it against a visual analysis of the actual product.
+    prompt = f"""You are a product data validator. Decide if the user-provided text is about the SAME type of product shown in the visual analysis, or about a COMPLETELY DIFFERENT product.
 
-VISUAL ANALYSIS (ground truth — what the camera sees):
+VISUAL ANALYSIS (what the camera shows):
 {vlm_json}
 
-PRODUCT CATEGORY (detected from visual analysis): {vlm_categories}
+PRODUCT CATEGORY: {vlm_categories}
 
-USER-PROVIDED PRODUCT DATA (may contain errors or irrelevant text):
+USER-PROVIDED PRODUCT DATA:
 {product_json}
 
-TASK: Return a FILTERED copy of the user-provided product data. The detected product category above is your primary anchor for judging relevance.
-- KEEP: brand names, model names, alphanumeric codes (likely SKUs or model numbers), product specifications (dosages, measurements, quantities, sizes), ingredients, materials, and any term that describes or is relevant to the detected product category.
-- REMOVE: words or phrases that clearly belong to a DIFFERENT product category. For example, food-related terms on an electronics product, or clothing terms on a skincare product.
-- When in doubt, KEEP the term — only remove when you are confident it belongs to a completely different product category.
-- For non-text fields (price, SKU, numeric values, etc.): Keep them unchanged.
-- If ALL words in a field are irrelevant to the detected category, return an empty string for that field.
+TASK: For each text field in the user-provided data, answer ONE question: "Is this text about a completely different type of product than what the image shows?"
+- If YES (completely different product type, e.g. "laptop" on a shoe image, or "yoga mat" on a blender image) → set that field to an empty string.
+- If NO (same product, related, or even partially relevant) → keep the ENTIRE field exactly as the user provided it. Do NOT modify, rephrase, or remove individual words.
+
+This is a binary decision per field — keep it all or clear it all. Never partially edit the user's text.
+For non-text fields (price, SKU, numeric values): always keep unchanged.
 
 Return ONLY valid JSON with the same structure as the user-provided data. No markdown, no comments."""
 
@@ -342,7 +342,17 @@ def _call_nemotron_enhance(
     # Step 1: Enhance VLM output and localize to target language (single call for efficiency)
     enhanced = _call_nemotron_enhance_vlm(vlm_output, filtered_product_data, locale)
     logger.info("Step 1 complete (enhanced + localized to %s): enhanced_keys=%s", locale, list(enhanced.keys()))
-    
+
+    # Post-check: guarantee user-provided title words survive the LLM pipeline
+    # Uses the ORIGINAL product_data (not filtered) — the user typed it, we keep it.
+    if product_data and product_data.get("title") and enhanced.get("title"):
+        user_title = product_data["title"]
+        enhanced_lower = enhanced["title"].lower()
+        missing = [w for w in user_title.split() if w.lower() not in enhanced_lower]
+        if missing:
+            logger.info("Post-check: user words %s missing from title, prepending original user title", missing)
+            enhanced["title"] = user_title + " " + enhanced["title"]
+
     # Step 2: Apply brand instructions if provided
     if brand_instructions:
         enhanced = _call_nemotron_apply_branding(enhanced, brand_instructions, locale)
