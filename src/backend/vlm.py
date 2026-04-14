@@ -14,7 +14,6 @@
 # limitations under the License.
 
 import os
-import re
 import json
 import base64
 import logging
@@ -343,19 +342,6 @@ def _call_nemotron_enhance(
     # Step 1: Enhance VLM output and localize to target language (single call for efficiency)
     enhanced = _call_nemotron_enhance_vlm(vlm_output, filtered_product_data, locale)
     logger.info("Step 1 complete (enhanced + localized to %s): enhanced_keys=%s", locale, list(enhanced.keys()))
-
-    # Post-check: guarantee user-provided title words survive the LLM pipeline.
-    # Only applies for English locales — for non-English, the LLM translates the
-    # user's words into the target language, so English word matching doesn't apply.
-    if product_data and product_data.get("title") and enhanced.get("title") and locale.startswith("en"):
-        user_title = product_data["title"]
-        # Word-boundary matching: tokenize both into word sets to avoid substring false positives
-        enhanced_words = set(re.findall(r'[a-zA-Z0-9]+(?:[-\'][a-zA-Z0-9]+)*', enhanced["title"].lower()))
-        user_words = re.findall(r'[a-zA-Z0-9]+(?:[-\'][a-zA-Z0-9]+)*', user_title.lower())
-        missing = [w for w in user_words if w not in enhanced_words]
-        if missing:
-            logger.info("Post-check: user words %s missing from title, prepending original user title", missing)
-            enhanced["title"] = user_title + " " + enhanced["title"]
 
     # Step 2: Apply brand instructions if provided
     if brand_instructions:
