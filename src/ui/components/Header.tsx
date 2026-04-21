@@ -36,8 +36,8 @@ export function Header() {
       <AppBar
         slotLeft={
           <Flex gap="4" align="center">
-            <Image src="/logo.png" alt="NVIDIA Logo" width={32} height={32} />
-            <Text kind="title/sm">Catalog Enrichment Blueprint</Text>
+            <Image src="/logo.png" alt="NVIDIA Logo" width={80} height={32} />
+            <Text kind="title/sm">AI Catalog Enrichment</Text>
           </Flex>
         }
         slotRight={

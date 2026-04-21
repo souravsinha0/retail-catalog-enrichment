@@ -1,0 +1,114 @@
+# docker-compose.custom.yml
+services:
+  # ------------------------------------------------------------
+  # VLM Model (Vision-Language)
+  # ------------------------------------------------------------
+  vlm-nim:
+    image: nvcr.io/nim/nvidia/nemotron-nano-12b-v2-vl:1.5.0
+    container_name: nim-vlm
+    ports:
+      - "9002:8000"   # Changed from 9001 to 9002 (free)
+    environment:
+      - NGC_API_KEY=${NGC_API_KEY}
+    volumes:
+      - ${LOCAL_NIM_CACHE:-~/.cache/nim}:/opt/nim/.cache
+    shm_size: "16gb"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['1']
+              capabilities: [gpu]
+    restart: "no"
+    stdin_open: true
+    tty: true
+    networks:
+      - catalog-network
+
+  # ------------------------------------------------------------
+  # Flux Model (Image Generation)
+  # ------------------------------------------------------------
+  flux-nim:
+    image: nvcr.io/nim/black-forest-labs/flux.1-kontext-dev:1.0.0
+    container_name: nim-flux
+    ports:
+      - "9003:8000"   # Changed from 9003 (still free, keep as is)
+    environment:
+      - NGC_API_KEY=${NGC_API_KEY}
+      - HF_TOKEN=${HF_TOKEN}
+      - NIM_ALLOW_UNCHECKED_GENERATION=1
+    volumes:
+      - ${LOCAL_NIM_CACHE:-~/.cache/nim}:/opt/nim/.cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0']
+              capabilities: [gpu]
+    restart: "no"
+    stdin_open: true
+    tty: true
+    networks:
+      - catalog-network
+
+  # ---------------
+  # LLM NIM
+  # ---------------
+  llm-nim:
+    image: nvcr.io/nim/nvidia/nemotron-3-nano:1.7.0
+    container_name: nim-llm
+    ports:
+      - "9005:8000"          # Exposes LLM on a free host port (9005)
+    environment:
+      - NGC_API_KEY=${NGC_API_KEY}
+      #- NIM_MODEL_PROFILE=generic  # Ensures compatibility with your GPU
+      - NIM_ALLOW_PROFILE_FALLBACK=1
+    volumes:
+      - ${LOCAL_NIM_CACHE:-~/.cache/nim}:/opt/nim/.cache
+    shm_size: "16gb"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['3']   # Assign to an available GPU
+              capabilities: [gpu]
+    restart: "no"
+    stdin_open: true
+    tty: true
+    networks:
+      - catalog-network
+
+  # ------------------------------------------------------------
+  # Trellis Model (3D Asset Generation)
+  # ------------------------------------------------------------
+  trellis-nim:
+    image: nvcr.io/nim/microsoft/trellis:1.0.1
+    container_name: nim-trellis
+    ports:
+      - "9004:8000"   # Changed from 9004 (still free, keep as is)
+    environment:
+      - NGC_API_KEY=${NGC_API_KEY}
+      - NIM_MODEL_VARIANT=large:image
+      - NIM_ALLOW_UNCHECKED_GENERATION=1
+    volumes:
+      - ${LOCAL_NIM_CACHE:-~/.cache/nim}:/opt/nim/.cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['2']
+              capabilities: [gpu]
+    restart: "no"
+    stdin_open: true
+    tty: true
+    networks:
+      - catalog-network
+
+networks:
+  catalog-network:
+    external: true
+    name: catalog-network
